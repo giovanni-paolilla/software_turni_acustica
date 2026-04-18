@@ -201,16 +201,29 @@ class SolverAdvancedTests(unittest.TestCase):
         ops = ["Mario", "Luca", "Anna"]
         weeks = self._make_weeks(2)
         # Mario: solo audio, Luca: solo video, Anna: tutto
-        roles = {0: {"audio"}, 1: {"video"}, 2: {"audio", "video", "sabato"}}
+        roles = {0: {"audio", "sabato"}, 1: {"video", "sabato"},
+                 2: {"audio", "video", "sabato"}}
         solver = TurniSolver(ops, weeks, operator_roles=roles)
         solver.solve()
         self.assertEqual(solver.phase, SolvePhase.SOLVED)
         for r in solver.result_rows:
-            # Mario dovrebbe essere solo audio (o non assegnato)
-            if r["video"] == "Mario":
-                # Se Mario e' in video, il ruolo non e' stato rispettato
-                # Pero' il fallback permette tutti se il pool filtrato e' vuoto
-                pass
+            # Mario (indice 0) non deve mai apparire in video
+            self.assertNotEqual(r["video"], "Mario",
+                                "Mario e' abilitato solo audio ma assegnato a video")
+            # Luca (indice 1) non deve mai apparire in audio
+            self.assertNotEqual(r["audio"], "Luca",
+                                "Luca e' abilitato solo video ma assegnato ad audio")
+
+    def test_solve_with_roles_error_on_empty_pool(self):
+        ops = ["Mario", "Luca", "Anna"]
+        weeks = self._make_weeks(1)
+        # Nessuno abilitato all'audio
+        roles = {0: {"video", "sabato"}, 1: {"video", "sabato"},
+                 2: {"video", "sabato"}}
+        solver = TurniSolver(ops, weeks, operator_roles=roles)
+        result = solver.solve()
+        self.assertEqual(solver.phase, SolvePhase.ERROR)
+        self.assertIn("audio", result)
 
     def test_solve_with_historical_counts(self):
         ops = ["Mario", "Luca", "Anna"]

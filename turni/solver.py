@@ -145,15 +145,23 @@ class TurniSolver:
                 return (f"Errore: nessun operatore per "
                         f"'{week['week']}' ({week['month']}).")
 
-            # Filtra per ruolo
-            avail_a = [i for i in avail if "audio"  in roles.get(i, all_r)] or avail
-            avail_v = [i for i in avail if "video"  in roles.get(i, all_r)] or avail
-            avail_s = [i for i in avail if "sabato" in roles.get(i, all_r)] or avail
+            # Filtra per ruolo (nessun fallback: se il pool e' vuoto, e' un errore)
+            avail_a = [i for i in avail if "audio"  in roles.get(i, all_r)]
+            avail_v = [i for i in avail if "video"  in roles.get(i, all_r)]
+            avail_s = [i for i in avail if "sabato" in roles.get(i, all_r)]
 
-            if len(avail_a) < 1 or len(avail_v) < 1:
+            if not avail_a or not avail_v or not avail_s:
+                missing = []
+                if not avail_a:
+                    missing.append("audio")
+                if not avail_v:
+                    missing.append("video")
+                if not avail_s:
+                    missing.append("sabato")
                 self.phase = SolvePhase.ERROR
-                return (f"Errore: operatori insufficienti per i ruoli in "
-                        f"'{week['week']}' ({week['month']}).")
+                return (f"Errore: nessun operatore abilitato per {', '.join(missing)} in "
+                        f"'{week['week']}' ({week['month']}). "
+                        f"Verifica la configurazione dei ruoli.")
 
             ta  = model.NewIntVarFromDomain(
                 cp_model.Domain.FromValues(avail_a), f"ta_w{week_idx}")
