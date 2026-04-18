@@ -454,7 +454,8 @@ class TurniApp(ctk.CTk):
             for role in ["audio", "video", "sabato"]:
                 var = tk.BooleanVar(value=(role in current))
                 role_vars[i][role] = var
-                ctk.CTkCheckBox(row, text=role.capitalize(), variable=var,
+                label = {"audio": "Audio", "video": "Video", "sabato": "Audio-Video"}.get(role, role.capitalize())
+                ctk.CTkCheckBox(row, text=label, variable=var,
                                 text_color=TEXT, font=FONT_SMALL).pack(side="left", padx=8)
 
         def apply():

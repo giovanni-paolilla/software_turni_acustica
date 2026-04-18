@@ -6,6 +6,35 @@ Ottimizza l'assegnazione degli operatori ai turni (giovedi audio/video + domenic
 
 ---
 
+## Installazione su EndeavourOS / Arch Linux
+
+### Metodo rapido (consigliato)
+
+```bash
+git clone https://github.com/giovanni-paolilla/software_turni_acustica.git
+cd software_turni_acustica
+sudo bash install.sh
+```
+
+L'applicazione comparira' nel menu come **"Gestione Turni"** e sara' avviabile da terminale con `turni-acustica`.
+
+### Disinstallazione
+
+```bash
+sudo bash uninstall.sh
+```
+
+### Metodo manuale (senza installazione)
+
+```bash
+sudo pacman -S python tk
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python turni_v16.py
+```
+
+---
+
 ## Funzionalita'
 
 - Inserimento operatori, mesi e anno di pianificazione
@@ -28,25 +57,6 @@ Ottimizza l'assegnazione degli operatori ai turni (giovedi audio/video + domenic
 
 ---
 
-## Requisiti
-
-- Python 3.8+
-- Tkinter (incluso nella maggior parte delle distribuzioni Python)
-
-```bash
-pip install -r requirements.txt
-```
-
----
-
-## Avvio
-
-```bash
-python turni_v16.py
-```
-
----
-
 ## Struttura del progetto
 
 ```
@@ -61,14 +71,20 @@ turni/
     config.py             configurazione utente e auto-salvataggio
     ics_export.py         export iCalendar e formato WhatsApp
     docx_export.py        generazione documento Word personalizzabile
-    solver.py             SolvePhase + TurniSolver (CP-SAT, ruoli, storico, lock, multi-sede)
+    solver.py             SolvePhase + TurniSolver (CP-SAT)
     ui/
-        widgets.py        ScrollableFrame, styled_btn, card
+        widgets.py        ScrollableFrame, styled_btn, card (CustomTkinter)
         app.py            TurniApp -- wizard a 3 step
+packaging/
+    turni-acustica.desktop    desktop entry per il menu applicazioni
+    turni-acustica.svg        icona applicazione
+    turni-acustica.sh         launcher script
+    PKGBUILD                  pacchetto Arch Linux
 tests/
-    test_helpers.py       test moduli core
-    test_new_features.py  test nuove funzionalita'
-turni_v15.py              versione monolitica originale (riferimento)
+    test_helpers.py           test moduli core
+    test_new_features.py      test nuove funzionalita'
+install.sh                    installazione rapida EndeavourOS/Arch
+uninstall.sh                  disinstallazione pulita
 ```
 
 ---
