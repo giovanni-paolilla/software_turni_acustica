@@ -33,7 +33,13 @@ from turni.io_utils import (
     _pid_is_alive,
 )
 from turni.solver import TurniSolver, ORTOOLS_OK, SolvePhase
-from turni.docx_export import build_turni_docx
+
+try:
+    from turni.docx_export import build_turni_docx
+    _DOCX_OK = True
+except ImportError:
+    _DOCX_OK = False
+    build_turni_docx = None  # type: ignore[assignment,misc]
 
 try:
     from turni.ui.app import TurniApp
@@ -193,6 +199,7 @@ class HelperTests(unittest.TestCase):
         self.assertFalse(solver.solved_ok)
         self.assertIn("Nessuna soluzione", result)
 
+    @unittest.skipUnless(_DOCX_OK, "python-docx non installato nel test environment")
     def test_build_turni_docx_uses_requested_exact_layout(self):
         with tempfile.TemporaryDirectory() as tmp:
             target = pathlib.Path(tmp) / "turni.docx"
@@ -381,7 +388,7 @@ class RestartAndTimeoutTests(unittest.TestCase):
         class _DummyLabel:
             def __init__(self):
                 self.kw = None
-            def config(self, **kw):
+            def configure(self, **kw):
                 self.kw = kw
 
         app.weeks_data = [{"week": "Sett.1"}]

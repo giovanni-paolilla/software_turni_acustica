@@ -169,6 +169,13 @@ class IcsExportTests(unittest.TestCase):
         ics = build_ics("2026", rows)
         self.assertIn("[Messina]", ics)
 
+    def test_parse_week_dates_cross_year(self):
+        thu, sun = _parse_week_dates("Sett. 31 Dic - 03 Gen", "2026")
+        self.assertEqual(thu.month, 12)
+        self.assertEqual(thu.year, 2026)
+        self.assertEqual(sun.month, 1)
+        self.assertEqual(sun.year, 2027)
+
     def test_format_whatsapp(self):
         rows = [
             {"week": "Sett. 08-11 Gen", "audio": "Mario", "video": "Luca",

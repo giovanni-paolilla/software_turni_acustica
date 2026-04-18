@@ -5,6 +5,8 @@ import json
 import logging
 import os
 
+from turni.io_utils import _write_text_file_atomic
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_DIR = os.path.join(os.path.expanduser("~"), ".turni_acustica")
@@ -51,8 +53,10 @@ class UserConfig:
     def _save(self) -> None:
         os.makedirs(self.directory, exist_ok=True)
         try:
-            with open(self.config_path, "w", encoding="utf-8") as fh:
-                json.dump(self._data, fh, ensure_ascii=False, indent=2)
+            _write_text_file_atomic(
+                self.config_path,
+                json.dumps(self._data, ensure_ascii=False, indent=2),
+            )
         except OSError:
             logger.warning("Impossibile salvare config: %s", self.config_path)
 
@@ -111,8 +115,10 @@ class UserConfig:
     def save_autosave(self, session_data: dict) -> None:
         os.makedirs(self.directory, exist_ok=True)
         try:
-            with open(self.autosave_path, "w", encoding="utf-8") as fh:
-                json.dump(session_data, fh, ensure_ascii=False, indent=2)
+            _write_text_file_atomic(
+                self.autosave_path,
+                json.dumps(session_data, ensure_ascii=False, indent=2),
+            )
         except OSError:
             logger.warning("Auto-save fallito: %s", self.autosave_path)
 

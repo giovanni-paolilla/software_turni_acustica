@@ -34,7 +34,8 @@ def _parse_week_dates(week_label: str, anno: str) -> tuple[date | None, date | N
     if not mo1 or not mo2:
         return None, None
     try:
-        return date(year, mo1, int(d1)), date(year, mo2, int(d2))
+        year2 = year + 1 if mo2 < mo1 else year
+        return date(year, mo1, int(d1)), date(year2, mo2, int(d2))
     except ValueError:
         return None, None
 

@@ -61,9 +61,8 @@ class TurniApp(ctk.CTk):
         self.weeks_data      = []
         self.solver_timeout  = tk.StringVar(value=str(int(SOLVER_TIMEOUT)))
 
-        self.operator_roles:  dict[int, set[str]] = {}
-        self.recurring_busy:  dict[int, list[int]] = {}
-        self.operator_sites:  dict[int, list[str]] = {}
+        self.operator_roles:  dict[str, set[str]] = {}
+        self.recurring_busy:  dict[str, list[int]] = {}
 
         self.use_history     = tk.BooleanVar(value=False)
         self.history_weight  = tk.DoubleVar(value=self._config.history_weight * 100)
@@ -413,8 +412,16 @@ class TurniApp(ctk.CTk):
         self.operatori, self.operatori_norm, self.mesi = new_ops, new_norm, new_mesi
         self._prev_ops, self._prev_mesi = list(new_ops), list(new_mesi)
         self.weeks_data = []
-        self.operator_roles = {i: set(ALL_ROLES) for i in range(len(new_ops))}
-        self.operator_sites = {i: list(self.sites) for i in range(len(new_ops))}
+        # Preserva ruoli esistenti per operatori gia' presenti, default ALL_ROLES per i nuovi
+        new_norm_set = set(new_norm)
+        for norm_name in new_norm:
+            if norm_name not in self.operator_roles:
+                self.operator_roles[norm_name] = set(ALL_ROLES)
+        # Rimuovi voci di operatori non piu' presenti
+        for stale in [k for k in self.operator_roles if k not in new_norm_set]:
+            del self.operator_roles[stale]
+        for stale in [k for k in self.recurring_busy if k not in new_norm_set]:
+            del self.recurring_busy[stale]
         self._build_step1_content()
         self._step1_built = True
         self._show_step(1)
@@ -442,26 +449,27 @@ class TurniApp(ctk.CTk):
         sf = ScrollableFrame(dlg)
         sf.pack(fill="both", expand=True, padx=16)
 
-        role_vars: dict[int, dict[str, tk.BooleanVar]] = {}
+        role_vars: dict[str, dict[str, tk.BooleanVar]] = {}
         for i, op in enumerate(temp_ops):
+            norm_key = normalize_name(op)
             row = ctk.CTkFrame(sf.inner, fg_color=PANEL_BG, corner_radius=6,
                                border_width=1, border_color=BORDER)
             row.pack(fill="x", pady=2, padx=4)
             ctk.CTkLabel(row, text=op, text_color=TEXT, font=FONT_BOLD,
                          width=160, anchor="w").pack(side="left", padx=8)
-            role_vars[i] = {}
-            current = self.operator_roles.get(i, ALL_ROLES)
+            role_vars[norm_key] = {}
+            current = self.operator_roles.get(norm_key, ALL_ROLES)
             for role in ["audio", "video", "sabato"]:
                 var = tk.BooleanVar(value=(role in current))
-                role_vars[i][role] = var
+                role_vars[norm_key][role] = var
                 label = {"audio": "Audio", "video": "Video", "sabato": "Audio-Video"}.get(role, role.capitalize())
                 ctk.CTkCheckBox(row, text=label, variable=var,
                                 text_color=TEXT, font=FONT_SMALL).pack(side="left", padx=8)
 
         def apply():
-            for i in role_vars:
-                roles = {r for r, v in role_vars[i].items() if v.get()}
-                self.operator_roles[i] = roles if roles else set(ALL_ROLES)
+            for norm_key in role_vars:
+                roles = {r for r, v in role_vars[norm_key].items() if v.get()}
+                self.operator_roles[norm_key] = roles if roles else set(ALL_ROLES)
             dlg.destroy()
         styled_btn(dlg, "Applica", apply, bg=SUCCESS).pack(pady=12)
         dlg.update_idletasks()
@@ -493,28 +501,29 @@ class TurniApp(ctk.CTk):
         sf = ScrollableFrame(dlg)
         sf.pack(fill="both", expand=True, padx=16)
 
-        pattern_vars: dict[int, dict[int, tk.BooleanVar]] = {}
+        pattern_vars: dict[str, dict[int, tk.BooleanVar]] = {}
         for i, op in enumerate(temp_ops):
+            norm_key = normalize_name(op)
             row = ctk.CTkFrame(sf.inner, fg_color=PANEL_BG, corner_radius=6,
                                border_width=1, border_color=BORDER)
             row.pack(fill="x", pady=2, padx=4)
             ctk.CTkLabel(row, text=op, text_color=TEXT, font=FONT_BOLD,
                          width=140, anchor="w").pack(side="left", padx=8)
-            pattern_vars[i] = {}
-            current = self.recurring_busy.get(i, [])
+            pattern_vars[norm_key] = {}
+            current = self.recurring_busy.get(norm_key, [])
             for wk in range(1, 6):
                 var = tk.BooleanVar(value=(wk in current))
-                pattern_vars[i][wk] = var
+                pattern_vars[norm_key][wk] = var
                 ctk.CTkCheckBox(row, text=f"{wk}a sett.", variable=var,
                                 text_color=TEXT, font=FONT_SMALL).pack(side="left", padx=4)
 
         def apply():
-            for i in pattern_vars:
-                weeks = [wk for wk, v in pattern_vars[i].items() if v.get()]
+            for norm_key in pattern_vars:
+                weeks = [wk for wk, v in pattern_vars[norm_key].items() if v.get()]
                 if weeks:
-                    self.recurring_busy[i] = weeks
+                    self.recurring_busy[norm_key] = weeks
                 else:
-                    self.recurring_busy.pop(i, None)
+                    self.recurring_busy.pop(norm_key, None)
             dlg.destroy()
         styled_btn(dlg, "Applica", apply, bg=SUCCESS).pack(pady=12)
         dlg.update_idletasks()
@@ -612,9 +621,12 @@ class TurniApp(ctk.CTk):
     def _apply_recurring_busy(self, rd, week_of_month):
         if not week_of_month:
             return
-        for op_idx, weeks_pattern in self.recurring_busy.items():
-            if week_of_month in weeks_pattern and op_idx in rd["busy_vars"]:
-                rd["busy_vars"][op_idx].set(True)
+        for norm_key, weeks_pattern in self.recurring_busy.items():
+            if week_of_month in weeks_pattern:
+                # Trova l'indice operatore corrispondente al nome normalizzato
+                for op_idx, op_norm in enumerate(self.operatori_norm):
+                    if op_norm == norm_key and op_idx in rd["busy_vars"]:
+                        rd["busy_vars"][op_idx].set(True)
 
     def _add_week_row(self, mese):
         rows_frame = self._month_frames[mese]
@@ -694,25 +706,26 @@ class TurniApp(ctk.CTk):
 
         # Controlla se ci sono settimane bloccate senza assegnazione
         locked_without_assignment = [
-            rd["name_var"].get()
+            (rd["month"], rd["name_var"].get())
             for rd in self._week_rows
             if rd["lock_var"].get()
         ]
         # Le settimane possono essere bloccate solo se hanno un'assegnazione precedente
         # (salvata nei result_rows_edit da un solve precedente)
-        locked_assignments = {}
+        locked_assignments: dict[tuple[str, str], dict] = {}
         # Cerca assegnazioni sia nei risultati editabili che nei dati riga (da sessione caricata)
         for r in self._result_rows_edit:
             if r.get("locked") and r.get("locked_assignment"):
-                locked_assignments[r["week"]] = r["locked_assignment"]
+                locked_assignments[(r["month"], r["week"])] = r["locked_assignment"]
         for rd in self._week_rows:
             if rd["lock_var"].get() and "locked_assignment" in rd:
-                week_name = rd["name_var"].get()
-                if week_name not in locked_assignments:
-                    locked_assignments[week_name] = rd["locked_assignment"]
+                key = (rd["month"], rd["name_var"].get())
+                if key not in locked_assignments:
+                    locked_assignments[key] = rd["locked_assignment"]
 
         if locked_without_assignment:
-            unresolved = [w for w in locked_without_assignment if w not in locked_assignments]
+            unresolved = [w for m, w in locked_without_assignment
+                          if (m, w) not in locked_assignments]
             if unresolved:
                 messagebox.showwarning("Attenzione",
                     "Le seguenti settimane sono marcate 'Blocca' ma non hanno "
@@ -731,10 +744,10 @@ class TurniApp(ctk.CTk):
             if rd["date_key"]:
                 entry["date_key"] = rd["date_key"]
             if rd["lock_var"].get():
-                week_name = rd["name_var"].get()
-                if week_name in locked_assignments:
+                key = (rd["month"], rd["name_var"].get())
+                if key in locked_assignments:
                     entry["locked"] = True
-                    entry["locked_assignment"] = locked_assignments[week_name]
+                    entry["locked_assignment"] = locked_assignments[key]
             raw_weeks.append(entry)
 
         try:
@@ -930,6 +943,7 @@ class TurniApp(ctk.CTk):
                 self._validate_table_row(row_idx)
                 if self._last_solver:
                     self._last_solver.result_rows = list(self._result_rows_edit)
+                    self._recalculate_counts()
                     self._last_result_text = self._last_solver._format_text()
                     self._set_result(self._last_result_text)
             _dismiss_combo()
@@ -937,6 +951,23 @@ class TurniApp(ctk.CTk):
         combo.bind("<<ComboboxSelected>>", on_select)
         combo.bind("<FocusOut>", lambda e: _dismiss_combo())
         combo.bind("<Escape>", lambda e: _dismiss_combo())
+
+    def _recalculate_counts(self):
+        """Ricalcola i conteggi turni dal contenuto attuale di _result_rows_edit."""
+        _s = self._last_solver
+        if not _s:
+            return
+        counts = [0] * len(_s.operatori)
+        for r in self._result_rows_edit:
+            for role in ("audio", "video", "sabato"):
+                name = r.get(role, "")
+                for i, op in enumerate(_s.operatori):
+                    if op == name:
+                        counts[i] += 1
+                        break
+        _s.counts = counts
+        if counts:
+            _s.diff_val = max(counts) - min(counts)
 
     def _validate_table_row(self, row_idx):
         row = self._result_rows_edit[row_idx]
@@ -947,7 +978,12 @@ class TurniApp(ctk.CTk):
         ops_snap = list(self.operatori)
         weeks_snap = [{**w, "available": list(w["available"]), "busy": list(w["busy"])}
                       for w in self.weeks_data]
-        roles = dict(self.operator_roles) if self.operator_roles else None
+        # Converti operator_roles da chiave nome-norm a chiave indice per il solver
+        roles = None
+        if self.operator_roles:
+            roles = {}
+            for i, norm in enumerate(self.operatori_norm):
+                roles[i] = self.operator_roles.get(norm, set(ALL_ROLES))
         hist_counts, hist_weight = None, 0.0
         if self.use_history.get():
             hist_counts = self._history.get_cumulative_counts(ops_snap)
@@ -1311,14 +1347,25 @@ class TurniApp(ctk.CTk):
         self.operator_roles = {}
         for k, v in session.get("operator_roles", {}).items():
             try:
-                self.operator_roles[int(k)] = set(v)
-            except (ValueError, TypeError):
+                # Retrocompatibilita': se la chiave e' un indice numerico, converti a nome
+                try:
+                    idx = int(k)
+                    norm_key = self.operatori_norm[idx] if idx < len(self.operatori_norm) else k
+                except ValueError:
+                    norm_key = k
+                self.operator_roles[norm_key] = set(v)
+            except (TypeError, IndexError):
                 pass
         self.recurring_busy = {}
         for k, v in session.get("recurring_busy", {}).items():
             try:
-                self.recurring_busy[int(k)] = list(v)
-            except (ValueError, TypeError):
+                try:
+                    idx = int(k)
+                    norm_key = self.operatori_norm[idx] if idx < len(self.operatori_norm) else k
+                except ValueError:
+                    norm_key = k
+                self.recurring_busy[norm_key] = list(v)
+            except (TypeError, IndexError):
                 pass
 
         self._build_step1_content(add_default_row=False)
@@ -1343,13 +1390,15 @@ class TurniApp(ctk.CTk):
 
         # Ripristina locked_assignment dalle locked_results salvate
         locked_results = session.get("locked_results", [])
-        locked_map: dict[str, dict] = {}
+        locked_map: dict[tuple[str, str], dict] = {}
         for lr in locked_results:
-            locked_map[lr.get("week", "")] = lr.get("locked_assignment", {})
+            key = (lr.get("month", ""), lr.get("week", ""))
+            locked_map[key] = lr.get("locked_assignment", {})
         for rd in self._week_rows:
             week_name = rd["name_var"].get()
-            if rd["lock_var"].get() and week_name in locked_map:
-                rd["locked_assignment"] = locked_map[week_name]
+            key = (rd["month"], week_name)
+            if rd["lock_var"].get() and key in locked_map:
+                rd["locked_assignment"] = locked_map[key]
 
         self._show_step(1)
         messagebox.showinfo("Caricato",

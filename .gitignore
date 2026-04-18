@@ -15,8 +15,14 @@ dist/
 build/
 *.egg-info/
 
-# Lock files (runtime artifacts)
-*.lock
+# Lock files (runtime artifacts dell'app, non package manager locks)
+*.json.lock
+
+# Packaging build artifacts (makepkg)
+packaging/pkg/
+packaging/src/
+packaging/*.pkg.tar.zst
+packaging/*.tar.gz
 
 # Temporary export files
 *.tmp
