@@ -9,9 +9,6 @@ license=('MIT')
 depends=(
     'python'
     'tk'
-    'python-ortools'
-    'python-docx'
-    'python-customtkinter'
 )
 # Se i pacchetti python non sono disponibili in AUR, pip li installa nel package()
 makedepends=('python-pip' 'python-setuptools')
