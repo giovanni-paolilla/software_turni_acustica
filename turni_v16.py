@@ -19,7 +19,8 @@ from tkinter import messagebox
 from turni.solver import ORTOOLS_OK
 from turni.ui.app import TurniApp
 
-if __name__ == "__main__":
+
+def main() -> None:
     logging.basicConfig(
         level=logging.WARNING,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -34,3 +35,7 @@ if __name__ == "__main__":
         _r.destroy()
 
     TurniApp().mainloop()
+
+
+if __name__ == "__main__":
+    main()

@@ -26,12 +26,14 @@ def _dedupe_normalized_texts(values: list[str]) -> tuple[list[str], list[str], l
     """Deduplica stringhe preservando l'ordine e confrontando via normalize_name()."""
     unique_values: list[str] = []
     unique_norms: list[str] = []
+    seen_norms: set[str] = set()
     duplicates: list[str] = []
     for value in values:
         norm = normalize_name(value)
-        if norm not in unique_norms:
+        if norm not in seen_norms:
             unique_values.append(value)
             unique_norms.append(norm)
+            seen_norms.add(norm)
         else:
             duplicates.append(value)
     return unique_values, unique_norms, duplicates

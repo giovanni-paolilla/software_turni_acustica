@@ -78,6 +78,7 @@ class TurniApp(tk.Tk):
         self._btn_modify = None
         self._btn_save_txt = None
         self._btn_save_csv = None
+        self._btn_save_docx = None
         self._btn_restart = None
         self._cancel_btn = None
 
@@ -158,6 +159,7 @@ class TurniApp(tk.Tk):
             self._btn_modify,
             self._btn_save_txt,
             self._btn_save_csv,
+            self._btn_save_docx,
             self._btn_restart,
         ):
             if btn is not None:
@@ -654,8 +656,9 @@ class TurniApp(tk.Tk):
 
     # ─── Export ──────────────────────────────────────────────
     def _export(self, fmt):
-        solver_ok = self._last_solver is not None and self._last_solver.solved_ok
-        if not solver_ok:
+        _s = self._last_solver
+        has_result = _s is not None and (_s.solved_ok or _s.partial_result_available)
+        if not has_result:
             messagebox.showinfo("Info",
                 "Nessun risultato da esportare.", parent=self)
             return

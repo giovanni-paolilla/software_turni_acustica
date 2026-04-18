@@ -5,6 +5,7 @@ import io
 import logging
 import threading
 from enum import Enum, auto
+from typing import Any
 
 from turni.constants import PESO_DIFF, PESO_PENALTY, SOLVER_TIMEOUT
 from turni.helpers import normalize_name, _safe_csv_cell
@@ -106,6 +107,7 @@ class TurniSolver:
         self._reset_result_state()
 
         if not ORTOOLS_OK:
+            self.phase = SolvePhase.ERROR
             return ("ERRORE: ortools non installato.\n"
                     "Esegui:  pip install ortools")
 
@@ -125,6 +127,7 @@ class TurniSolver:
             key   = week_idx
             avail = week["available"]
             if not avail:
+                self.phase = SolvePhase.ERROR
                 return (f"Errore: nessun operatore per "
                         f"'{week['week']}' ({week['month']}).")
             ta  = model.NewIntVarFromDomain(
@@ -150,7 +153,7 @@ class TurniSolver:
         tot_pen = model.NewIntVar(0, 2*len(weeks_data), "tp")
         model.Add(tot_pen == sum(penalties))
 
-        ind: list[list] = [[] for _ in range(n)]
+        ind: list[list[Any]] = [[] for _ in range(n)]
         for week_idx, week in enumerate(weeks_data):
             key = week_idx
             for ruolo, var in turn_vars[key].items():
@@ -195,6 +198,7 @@ class TurniSolver:
             return "Calcolo annullato prima di trovare una soluzione."
 
         if status not in [cp_model.OPTIMAL, cp_model.FEASIBLE]:
+            self.phase = SolvePhase.ERROR
             return "Nessuna soluzione trovata. Controlla i dati inseriti."
 
         self.result_rows = []
