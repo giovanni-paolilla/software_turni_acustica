@@ -101,9 +101,9 @@ class _TargetFileLock:
                 "created_at": time.time(),
                 "proc_start_token": _get_process_start_token(os.getpid()),
             })
-            os.write(fd, payload.encode("utf-8", errors="ignore"))
+            os.write(fd, payload.encode())
             os.fsync(fd)
-        except Exception:
+        except OSError:
             try:
                 os.close(fd)
             except OSError:
@@ -158,7 +158,7 @@ def _write_text_file_atomic(path: str, data: str, newline: str | None = None) ->
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(tmp_path, path)
-        except Exception:
+        except OSError:
             try:
                 os.unlink(tmp_path)
             except OSError:

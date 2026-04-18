@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "software-turni-acustica"
+version = "1.16.0"
+description = "Gestione turni audio/video Messina-Ganzirri — CP-SAT solver con UI Tkinter"
+requires-python = ">=3.8"
+dependencies = [
+    "ortools>=9.9",
+    "python-docx>=1.1",
+]
+
+[project.scripts]
+turni = "turni_v16:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["turni*"]

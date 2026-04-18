@@ -21,11 +21,13 @@ build/
 # Temporary export files
 *.tmp
 
-# Output / preview artifacts
+# Output / preview artifacts (file generati dall'app, non file di progetto)
 rendered/
-*.docx
-*.txt
-*.csv
+turni_*.docx
+turni_*.txt
+turni_*.csv
+sessione_*.json
+preview_*.docx
 
 # IDE
 .vscode/

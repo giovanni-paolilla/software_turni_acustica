@@ -1,13 +1,19 @@
 """Funzioni pure di utilità condivise tra UI, solver e I/O."""
 from __future__ import annotations
+from typing import Any
 
 
 def normalize_name(name: str) -> str:
     return " ".join(name.strip().split()).lower()
 
 
-def _safe_csv_cell(value: str) -> str:
-    """Neutralizza formule potenzialmente eseguibili nei fogli di calcolo."""
+def _safe_csv_cell(value: Any) -> Any:
+    """Neutralizza formule potenzialmente eseguibili nei fogli di calcolo.
+
+    Ritorna il valore invariato se non e' una stringa.
+    Antepone "'" ai valori stringa che iniziano con =, +, -, @ per
+    impedire l'esecuzione di formule in Excel/LibreOffice.
+    """
     if not isinstance(value, str):
         return value
     stripped = value.lstrip()
@@ -55,11 +61,15 @@ def _order_weeks_by_declared_months(weeks: list[dict], declared_months: list[str
             ordered.extend(grouped[month_norm])
             seen_months.add(month_norm)
 
+    # Fallback: aggruppa le settimane di mesi non dichiarati (non si verifica
+    # in produzione grazie alla validazione, ma il codice deve essere corretto).
+    extra: dict[str, list[dict]] = {}
     for week in weeks:
         month_norm = normalize_name(week["month"])
         if month_norm not in seen_months:
-            ordered.append(week)
-            seen_months.add(month_norm)
+            extra.setdefault(month_norm, []).append(week)
+    for month_weeks in extra.values():
+        ordered.extend(month_weeks)
 
     return ordered
 

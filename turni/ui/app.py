@@ -13,6 +13,7 @@ from turni.constants import (
     HEADER_BG, MONTH_HDR_BG, ACCENT_LIGHT, BTN_SECONDARY, DANGER_LIGHT,
     HEADER_BTN, INFO_WARN, CYAN, SOLVER_TIMEOUT,
     FONT_TITLE, FONT_LABEL, FONT_BOLD, FONT_SMALL, FONT_MONO,
+    _FONT_FAMILY,
 )
 from turni.helpers import (
     normalize_name,
@@ -123,7 +124,6 @@ class TurniApp(tk.Tk):
             lbl.pack(side="left")
             self._step_labels.append(lbl)
             if i < len(self.steps)-1:
-                from turni.constants import _FONT_FAMILY
                 tk.Label(bar, text=">", bg=PANEL_BG,
                          fg=BORDER, font=(_FONT_FAMILY, 14)).pack(side="left")
 
