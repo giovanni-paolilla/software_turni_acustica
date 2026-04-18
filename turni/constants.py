@@ -11,8 +11,11 @@ import platform
 # ══════════════════════════════════════════════════════════════
 PESO_DIFF          = 100
 PESO_PENALTY       = 1
+PESO_HISTORY       = 50
 SOLVER_TIMEOUT     = 60.0
 LOCK_STALE_SECONDS = 24 * 60 * 60
+
+ALL_ROLES: frozenset[str] = frozenset({"audio", "video", "sabato"})
 
 
 # ══════════════════════════════════════════════════════════════

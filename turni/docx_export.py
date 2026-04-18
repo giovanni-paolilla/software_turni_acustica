@@ -1,6 +1,7 @@
 """Generazione del documento Word (DOCX) con il layout grafico richiesto."""
 from __future__ import annotations
 import re
+from typing import Any
 
 from docx import Document
 from docx.enum.section import WD_ORIENT
@@ -78,19 +79,11 @@ def _format_docx_table(table, column_widths_cm: list[float]) -> None:
 
 
 def _extract_week_dates_labels(week_label: str) -> tuple[str, str]:
-    """Estrae le etichette DATA in formato breve usato nel DOCX finale.
-
-    Esempi supportati:
-      - "Sett. 08-11 Gen"          -> ("08 Gen", "11 Gen")
-      - "Sett. 30 Apr - 03 Mag"    -> ("30 Apr", "03 Mag")
-
-    In fallback usa i soli numeri trovati; se il parsing fallisce evita crash e
-    restituisce etichette generiche mantenendo il documento esportabile.
-    """
+    """Estrae le etichette DATA in formato breve usato nel DOCX finale."""
     label = (week_label or "").strip()
     compact = re.sub(r"\s*-\s*", "-", label)
     match = re.search(
-        r"(?i)(\d{1,2})\s*([A-Za-zÀ-ÿ]{3,})?\s*-\s*(\d{1,2})\s*([A-Za-zÀ-ÿ]{3,})?",
+        r"(?i)(\d{1,2})\s*([A-Za-z\u00C0-\u00FF]{3,})?\s*-\s*(\d{1,2})\s*([A-Za-z\u00C0-\u00FF]{3,})?",
         compact,
     )
     if match:
@@ -108,12 +101,30 @@ def _extract_week_dates_labels(week_label: str) -> tuple[str, str]:
         return nums[0].zfill(2), nums[1].zfill(2)
     if len(nums) == 1:
         return nums[0].zfill(2), ""
-    return (label or "—", "—")
+    return (label or "\u2014", "\u2014")
 
 
-def build_turni_docx(path: str, anno: str, result_rows: list[dict], operatori: list[str],
-                     counts: list[int], status_str: str, diff_val: int, penalty_val: int) -> None:
-    """Genera il DOCX con il layout grafico continuo richiesto dall'utente."""
+def _hex_to_rgb(hex_color: str) -> RGBColor:
+    h = hex_color.lstrip("#")
+    return RGBColor(int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+
+
+def build_turni_docx(path: str, anno: str, result_rows: list[dict],
+                     operatori: list[str], counts: list[int],
+                     status_str: str, diff_val: int, penalty_val: int,
+                     *, template: dict[str, Any] | None = None) -> None:
+    """Genera il DOCX con il layout grafico continuo.
+
+    *template* opzionale: dict con chiavi title, title_color, subtitle_color,
+    font_title, font_body per personalizzare l'aspetto del documento.
+    """
+    tpl = template or {}
+    title_text     = tpl.get("title", "AUDIO/VIDEO MESSINA-GANZIRRI")
+    title_color    = tpl.get("title_color", "4C79C5")
+    subtitle_color = tpl.get("subtitle_color", "A8D033")
+    font_title     = tpl.get("font_title", "Times New Roman")
+    font_body      = tpl.get("font_body", "Arial")
+
     doc = Document()
     section = doc.sections[0]
     section.orientation = WD_ORIENT.LANDSCAPE
@@ -126,18 +137,23 @@ def build_turni_docx(path: str, anno: str, result_rows: list[dict], operatori: l
     page_width_cm = section.page_width.cm - section.left_margin.cm - section.right_margin.cm
 
     base_style = doc.styles["Normal"]
-    base_style.font.name = "Arial"
+    base_style.font.name = font_body
     base_style.font.size = Pt(10)
+
+    # Raggruppa per sede se presente
+    sites = list(dict.fromkeys(r.get("site", "") for r in result_rows))
+    has_sites = len(sites) > 1 or (sites and sites[0])
 
     ordered_months = list(dict.fromkeys(row["month"] for row in result_rows))
     months_caption = " - ".join(ordered_months) if ordered_months else "Programmazione"
 
+    # -- Tabella titolo ----------------------------------------------------
     title_table = doc.add_table(rows=1, cols=1)
     title_table.style = "Table Grid"
     title_table.autofit = False
     title_cell = title_table.rows[0].cells[0]
     title_cell.width = Cm(page_width_cm)
-    _set_cell_shading(title_cell, "4C79C5")
+    _set_cell_shading(title_cell, title_color)
     _clear_cell(title_cell)
     title_cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 
@@ -145,10 +161,10 @@ def build_turni_docx(path: str, anno: str, result_rows: list[dict], operatori: l
     p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p1.paragraph_format.space_before = Pt(0)
     p1.paragraph_format.space_after = Pt(1)
-    r1 = p1.add_run("AUDIO/VIDEO MESSINA-GANZIRRI")
+    r1 = p1.add_run(title_text)
     r1.bold = True
     r1.italic = True
-    r1.font.name = "Times New Roman"
+    r1.font.name = font_title
     r1.font.size = Pt(16)
     r1.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
 
@@ -158,59 +174,76 @@ def build_turni_docx(path: str, anno: str, result_rows: list[dict], operatori: l
     p2.paragraph_format.space_after = Pt(0)
     r2 = p2.add_run(f"{months_caption}   {anno}")
     r2.bold = True
-    r2.font.name = "Times New Roman"
+    r2.font.name = font_title
     r2.font.size = Pt(14)
-    r2.font.color.rgb = RGBColor(0xA8, 0xD0, 0x33)
+    r2.font.color.rgb = _hex_to_rgb(subtitle_color)
     _set_row_min_height(title_table.rows[0], 1.45)
 
-    doc.add_paragraph().paragraph_format.space_after = Pt(2)
+    # -- Tabelle dati (una per sede o una sola) ----------------------------
+    def _add_data_table(rows_subset: list[dict], site_label: str = "") -> None:
+        if site_label:
+            site_p = doc.add_paragraph()
+            site_p.paragraph_format.space_before = Pt(8)
+            site_p.paragraph_format.space_after = Pt(2)
+            sr = site_p.add_run(site_label)
+            sr.bold = True
+            sr.font.name = font_title
+            sr.font.size = Pt(13)
+            sr.font.color.rgb = _hex_to_rgb(title_color)
+        else:
+            doc.add_paragraph().paragraph_format.space_after = Pt(2)
 
-    table = doc.add_table(rows=1, cols=3)
-    table.style = "Table Grid"
-    _format_docx_table(table, [4.65, 7.0, 7.0])
+        table = doc.add_table(rows=1, cols=3)
+        table.style = "Table Grid"
+        _format_docx_table(table, [4.65, 7.0, 7.0])
 
-    hdr = table.rows[0].cells
-    headers = ["DATA", "VIDEO", "AUDIO"]
-    for idx, value in enumerate(headers):
-        _set_cell_text(hdr[idx], value, bold=True,
-                       align=WD_ALIGN_PARAGRAPH.CENTER, font_size=14,
-                       font_name="Times New Roman",
-                       color=RGBColor(0x2D, 0x3E, 0x56))
-        _set_cell_shading(hdr[idx], "C7D5EC")
-    _set_row_min_height(table.rows[0], 0.95)
+        hdr = table.rows[0].cells
+        headers = ["DATA", "VIDEO", "AUDIO"]
+        for idx, value in enumerate(headers):
+            _set_cell_text(hdr[idx], value, bold=True,
+                           align=WD_ALIGN_PARAGRAPH.CENTER, font_size=14,
+                           font_name=font_title,
+                           color=RGBColor(0x2D, 0x3E, 0x56))
+            _set_cell_shading(hdr[idx], "C7D5EC")
+        _set_row_min_height(table.rows[0], 0.95)
 
-    body_fill = "E9E9E9"
-    for row_data in result_rows:
-        left_label, right_label = _extract_week_dates_labels(row_data.get("week", ""))
+        body_fill = "E9E9E9"
+        for row_data in rows_subset:
+            left_label, right_label = _extract_week_dates_labels(
+                row_data.get("week", ""))
 
-        giovedi = table.add_row().cells
-        giovedi_values = [
-            left_label or "—",
-            row_data.get("video", "") or "",
-            row_data.get("audio", "") or "",
-        ]
-        for idx, value in enumerate(giovedi_values):
-            _set_cell_text(
-                giovedi[idx],
-                str(value),
-                align=WD_ALIGN_PARAGRAPH.CENTER,
-                font_size=10,
-                font_name="Arial",
-            )
-            _set_cell_shading(giovedi[idx], body_fill)
-        _set_row_min_height(table.rows[-1], 0.55)
+            giovedi = table.add_row().cells
+            giovedi_values = [
+                left_label or "\u2014",
+                row_data.get("video", "") or "",
+                row_data.get("audio", "") or "",
+            ]
+            for idx, value in enumerate(giovedi_values):
+                _set_cell_text(
+                    giovedi[idx], str(value),
+                    align=WD_ALIGN_PARAGRAPH.CENTER,
+                    font_size=10, font_name=font_body)
+                _set_cell_shading(giovedi[idx], body_fill)
+            _set_row_min_height(table.rows[-1], 0.55)
 
-        domenica = table.add_row().cells
-        merged = domenica[1].merge(domenica[2])
-        _set_cell_text(domenica[0], right_label or "—",
-                       align=WD_ALIGN_PARAGRAPH.CENTER,
-                       font_size=10, font_name="Arial")
-        _set_cell_shading(domenica[0], body_fill)
-        _set_cell_text(merged, row_data.get("sabato", "") or "",
-                       align=WD_ALIGN_PARAGRAPH.CENTER,
-                       font_size=10, font_name="Arial")
-        _set_cell_shading(merged, body_fill)
-        _set_row_min_height(table.rows[-1], 0.55)
+            domenica = table.add_row().cells
+            merged = domenica[1].merge(domenica[2])
+            _set_cell_text(domenica[0], right_label or "\u2014",
+                           align=WD_ALIGN_PARAGRAPH.CENTER,
+                           font_size=10, font_name=font_body)
+            _set_cell_shading(domenica[0], body_fill)
+            _set_cell_text(merged, row_data.get("sabato", "") or "",
+                           align=WD_ALIGN_PARAGRAPH.CENTER,
+                           font_size=10, font_name=font_body)
+            _set_cell_shading(merged, body_fill)
+            _set_row_min_height(table.rows[-1], 0.55)
+
+    if has_sites:
+        for site in sites:
+            site_rows = [r for r in result_rows if r.get("site", "") == site]
+            _add_data_table(site_rows, site_label=site or "Sede principale")
+    else:
+        _add_data_table(result_rows)
 
     footer = section.footer.paragraphs[0]
     footer.clear()

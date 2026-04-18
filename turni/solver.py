@@ -7,7 +7,9 @@ import threading
 from enum import Enum, auto
 from typing import Any
 
-from turni.constants import PESO_DIFF, PESO_PENALTY, SOLVER_TIMEOUT
+from turni.constants import (
+    PESO_DIFF, PESO_PENALTY, PESO_HISTORY, SOLVER_TIMEOUT, ALL_ROLES,
+)
 from turni.helpers import normalize_name, _safe_csv_cell
 
 logger = logging.getLogger(__name__)
@@ -21,11 +23,11 @@ except ImportError:
 
 class SolvePhase(Enum):
     """Stato del ciclo di vita di una singola esecuzione di solve()."""
-    IDLE              = auto()   # reset iniziale / dopo _reset_result_state
-    SOLVED            = auto()   # soluzione trovata correttamente
-    CANCELLED         = auto()   # annullato senza soluzione
-    CANCELLED_PARTIAL = auto()   # annullato con soluzione parziale disponibile
-    ERROR             = auto()   # errore imprevisto
+    IDLE              = auto()
+    SOLVED            = auto()
+    CANCELLED         = auto()
+    CANCELLED_PARTIAL = auto()
+    ERROR             = auto()
 
 
 class _CancelCallback(cp_model.CpSolverSolutionCallback if ORTOOLS_OK else object):
@@ -44,20 +46,23 @@ class TurniSolver:
     """Logica CP-SAT completamente disaccoppiata dalla UI.
 
     Attributi pubblici dopo solve():
-        result_rows  -- lista di dict con month/week/audio/video/sabato/busy
+        result_rows  -- lista di dict con month/week/audio/video/sabato/busy/site
         counts       -- turni totali per operatore (indice parallelo a operatori)
         diff_val     -- delta max-min (obiettivo di equita')
         penalty_val  -- penalita' sabato sovrapposto a turno settimanale
         status_str   -- "OTTIMALE" | "FATTIBILE (timeout)"
-        phase        -- SolvePhase corrente (IDLE / SOLVED / CANCELLED / CANCELLED_PARTIAL / ERROR)
+        phase        -- SolvePhase corrente
 
-    Proprieta' di retrocompatibilita' (derivate da phase):
-        solved_ok              -- True se phase == SOLVED
-        cancelled              -- True se phase in (CANCELLED, CANCELLED_PARTIAL)
-        partial_result_available -- True se phase == CANCELLED_PARTIAL
+    Parametri opzionali:
+        operator_roles     -- dict[int, set[str]]: ruoli abilitati per operatore
+        historical_counts  -- list[int]: turni storici cumulativi per operatore
+        history_weight     -- float 0..1: peso dell'equita' storica nell'obiettivo
     """
 
-    def __init__(self, operatori: list[str], weeks_data: list[dict]) -> None:
+    def __init__(self, operatori: list[str], weeks_data: list[dict], *,
+                 operator_roles: dict[int, set[str]] | None = None,
+                 historical_counts: list[int] | None = None,
+                 history_weight: float = 0.0) -> None:
         self.operatori:   list[str]  = operatori
         self.weeks_data:  list[dict] = weeks_data
         self.result_rows: list[dict] = []
@@ -68,20 +73,21 @@ class TurniSolver:
         self.phase:       SolvePhase = SolvePhase.IDLE
         self.cp_solver               = None
 
-    # ── Proprieta' di retrocompatibilita' ─────────────────────
+        self.operator_roles:    dict[int, set[str]] = operator_roles or {}
+        self.historical_counts: list[int] | None    = historical_counts
+        self.history_weight:    float                = history_weight
+
+    # -- Proprieta' di retrocompatibilita' ---------------------------------
     @property
     def solved_ok(self) -> bool:
-        """True solo se la soluzione e' completa e valida."""
         return self.phase == SolvePhase.SOLVED
 
     @property
     def cancelled(self) -> bool:
-        """True se il solve e' stato annullato (con o senza risultato parziale)."""
         return self.phase in (SolvePhase.CANCELLED, SolvePhase.CANCELLED_PARTIAL)
 
     @property
     def partial_result_available(self) -> bool:
-        """True se esiste una soluzione parziale dopo annullamento."""
         return self.phase == SolvePhase.CANCELLED_PARTIAL
 
     def _reset_result_state(self) -> None:
@@ -93,17 +99,11 @@ class TurniSolver:
         self.phase = SolvePhase.IDLE
         self.cp_solver = None
 
+    # ======================================================================
+    #  SOLVE
+    # ======================================================================
     def solve(self, cancel_event: threading.Event | None = None,
               timeout: float = SOLVER_TIMEOUT) -> str:
-        """Esegue il solver CP-SAT e restituisce il testo risultato.
-
-        Args:
-            cancel_event: Event impostato per interrompere la ricerca.
-            timeout:      Limite di tempo in secondi (default: SOLVER_TIMEOUT).
-
-        Returns:
-            Stringa formattata del risultato, o messaggio di errore.
-        """
         self._reset_result_state()
 
         if not ORTOOLS_OK:
@@ -120,65 +120,146 @@ class TurniSolver:
         operatori  = self.operatori
         weeks_data = self.weeks_data
         n          = len(operatori)
+        roles      = self.operator_roles
+        all_r      = ALL_ROLES
         model      = cp_model.CpModel()
-        turn_vars  = {}
+        turn_vars: dict[int, dict[str, Any]] = {}
+        locked_indices: set[int] = set()
 
+        # -- variabili per settimana ---------------------------------------
         for week_idx, week in enumerate(weeks_data):
-            key   = week_idx
             avail = week["available"]
+
+            # Settimana bloccata: variabili a dominio fisso
+            la = week.get("locked_assignment")
+            if week.get("locked") and isinstance(la, dict):
+                locked_indices.add(week_idx)
+                ta = model.NewIntVar(la["audio"], la["audio"], f"ta_w{week_idx}")
+                tv = model.NewIntVar(la["video"], la["video"], f"tv_w{week_idx}")
+                sat = model.NewIntVar(la["sabato"], la["sabato"], f"sat_w{week_idx}")
+                turn_vars[week_idx] = {"t_audio": ta, "t_video": tv, "sat": sat}
+                continue
+
             if not avail:
                 self.phase = SolvePhase.ERROR
                 return (f"Errore: nessun operatore per "
                         f"'{week['week']}' ({week['month']}).")
-            ta  = model.NewIntVarFromDomain(
-                cp_model.Domain.FromValues(avail), f"ta_w{key}")
-            tv  = model.NewIntVarFromDomain(
-                cp_model.Domain.FromValues(avail), f"tv_w{key}")
-            sat = model.NewIntVarFromDomain(
-                cp_model.Domain.FromValues(avail), f"sat_w{key}")
-            model.Add(ta != tv)
-            turn_vars[key] = {"t_audio": ta, "t_video": tv, "sat": sat}
 
-        penalties = []
-        for week_idx, week in enumerate(weeks_data):
-            key = week_idx
-            ta, tv, sat = (turn_vars[key]["t_audio"],
-                           turn_vars[key]["t_video"],
-                           turn_vars[key]["sat"])
+            # Filtra per ruolo
+            avail_a = [i for i in avail if "audio"  in roles.get(i, all_r)] or avail
+            avail_v = [i for i in avail if "video"  in roles.get(i, all_r)] or avail
+            avail_s = [i for i in avail if "sabato" in roles.get(i, all_r)] or avail
+
+            if len(avail_a) < 1 or len(avail_v) < 1:
+                self.phase = SolvePhase.ERROR
+                return (f"Errore: operatori insufficienti per i ruoli in "
+                        f"'{week['week']}' ({week['month']}).")
+
+            ta  = model.NewIntVarFromDomain(
+                cp_model.Domain.FromValues(avail_a), f"ta_w{week_idx}")
+            tv  = model.NewIntVarFromDomain(
+                cp_model.Domain.FromValues(avail_v), f"tv_w{week_idx}")
+            sat = model.NewIntVarFromDomain(
+                cp_model.Domain.FromValues(avail_s), f"sat_w{week_idx}")
+            model.Add(ta != tv)
+            turn_vars[week_idx] = {"t_audio": ta, "t_video": tv, "sat": sat}
+
+        # -- penalita' sabato sovrapposto ----------------------------------
+        penalties: list[Any] = []
+        for week_idx in range(len(weeks_data)):
+            ta  = turn_vars[week_idx]["t_audio"]
+            tv  = turn_vars[week_idx]["t_video"]
+            sat = turn_vars[week_idx]["sat"]
             for t_var, lbl in [(ta, "a"), (tv, "v")]:
-                pen = model.NewBoolVar(f"pen_{lbl}_w{key}")
+                pen = model.NewBoolVar(f"pen_{lbl}_w{week_idx}")
                 model.Add(sat == t_var).OnlyEnforceIf(pen)
                 model.Add(sat != t_var).OnlyEnforceIf(pen.Not())
                 penalties.append(pen)
-        tot_pen = model.NewIntVar(0, 2*len(weeks_data), "tp")
+        tot_pen = model.NewIntVar(0, 2 * len(weeks_data), "tp")
         model.Add(tot_pen == sum(penalties))
 
+        # -- indicatori e conteggi -----------------------------------------
         ind: list[list[Any]] = [[] for _ in range(n)]
         for week_idx, week in enumerate(weeks_data):
-            key = week_idx
-            for ruolo, var in turn_vars[key].items():
+            if week_idx in locked_indices:
+                # Per settimane bloccate, aggiungi indicatori fissi
+                la = week["locked_assignment"]
+                for op_idx in {la["audio"], la["video"], la["sabato"]}:
+                    if 0 <= op_idx < n:
+                        # conta quante volte appare
+                        count = sum(1 for v in [la["audio"], la["video"], la["sabato"]]
+                                    if v == op_idx)
+                        for c in range(count):
+                            b = model.NewBoolVar(f"b_locked_w{week_idx}_{op_idx}_{c}")
+                            model.Add(b == 1)
+                            ind[op_idx].append(b)
+                continue
+
+            for ruolo, var in turn_vars[week_idx].items():
                 for i in week["available"]:
-                    b = model.NewBoolVar(f"b_w{key}_{ruolo}_{i}")
+                    b = model.NewBoolVar(f"b_w{week_idx}_{ruolo}_{i}")
                     model.Add(var == i).OnlyEnforceIf(b)
                     model.Add(var != i).OnlyEnforceIf(b.Not())
                     ind[i].append(b)
 
+        ub = 3 * len(weeks_data)
         cnt_vars = []
         for i in range(n):
-            c = model.NewIntVar(0, 3*len(weeks_data), f"cnt{i}")
+            c = model.NewIntVar(0, ub, f"cnt{i}")
             model.Add(c == sum(ind[i]))
             cnt_vars.append(c)
 
-        mx = model.NewIntVar(0, 3*len(weeks_data), "mx")
-        mn = model.NewIntVar(0, 3*len(weeks_data), "mn")
+        mx = model.NewIntVar(0, ub, "mx")
+        mn = model.NewIntVar(0, ub, "mn")
         for c in cnt_vars:
             model.Add(c <= mx)
             model.Add(c >= mn)
-        diff = model.NewIntVar(0, 3*len(weeks_data), "diff")
+        diff = model.NewIntVar(0, ub, "diff")
         model.Add(diff == mx - mn)
 
-        model.Minimize(diff * PESO_DIFF + tot_pen * PESO_PENALTY)
+        # -- vincoli cross-sede --------------------------------------------
+        date_groups: dict[str, list[int]] = {}
+        for idx, w in enumerate(weeks_data):
+            dk = w.get("date_key")
+            if dk:
+                date_groups.setdefault(dk, []).append(idx)
+        for indices in date_groups.values():
+            for i in range(len(indices)):
+                for j in range(i + 1, len(indices)):
+                    wi, wj = indices[i], indices[j]
+                    site_i = weeks_data[wi].get("site", "")
+                    site_j = weeks_data[wj].get("site", "")
+                    if site_i and site_j and site_i != site_j:
+                        for vi in turn_vars[wi].values():
+                            for vj in turn_vars[wj].values():
+                                model.Add(vi != vj)
 
+        # -- obiettivo -----------------------------------------------------
+        hist = self.historical_counts
+        if hist and self.history_weight > 0 and len(hist) == n:
+            max_hist = max(hist) if hist else 0
+            total_ub = ub + max_hist
+            total_vars = []
+            for i in range(n):
+                t = model.NewIntVar(0, total_ub, f"tot{i}")
+                model.Add(t == cnt_vars[i] + hist[i])
+                total_vars.append(t)
+            hmx = model.NewIntVar(0, total_ub, "hmx")
+            hmn = model.NewIntVar(0, total_ub, "hmn")
+            for t in total_vars:
+                model.Add(t <= hmx)
+                model.Add(t >= hmn)
+            hdiff = model.NewIntVar(0, total_ub, "hdiff")
+            model.Add(hdiff == hmx - hmn)
+
+            hw = max(1, int(self.history_weight * PESO_HISTORY))
+            model.Minimize(
+                diff * PESO_DIFF + tot_pen * PESO_PENALTY + hdiff * hw
+            )
+        else:
+            model.Minimize(diff * PESO_DIFF + tot_pen * PESO_PENALTY)
+
+        # -- solve ---------------------------------------------------------
         solver = cp_model.CpSolver()
         solver.parameters.max_time_in_seconds = timeout
         self.cp_solver = solver
@@ -201,24 +282,30 @@ class TurniSolver:
             self.phase = SolvePhase.ERROR
             return "Nessuna soluzione trovata. Controlla i dati inseriti."
 
+        # -- estrai risultati ----------------------------------------------
         self.result_rows = []
         for week_idx, week in enumerate(weeks_data):
-            key = week_idx
-            ta  = solver.Value(turn_vars[key]["t_audio"])
-            tv  = solver.Value(turn_vars[key]["t_video"])
-            sat = solver.Value(turn_vars[key]["sat"])
+            ta  = solver.Value(turn_vars[week_idx]["t_audio"])
+            tv  = solver.Value(turn_vars[week_idx]["t_video"])
+            sat = solver.Value(turn_vars[week_idx]["sat"])
             busy_names = ", ".join(
                 operatori[i] for i, op in enumerate(operatori)
                 if normalize_name(op) in week["busy"]
             ) if week["busy"] else ""
-            self.result_rows.append({
+            row: dict[str, Any] = {
                 "month":  week["month"],
                 "week":   week["week"],
                 "audio":  operatori[ta],
                 "video":  operatori[tv],
                 "sabato": operatori[sat],
                 "busy":   busy_names,
-            })
+            }
+            if week.get("site"):
+                row["site"] = week["site"]
+            if week.get("locked"):
+                row["locked"] = True
+                row["locked_assignment"] = {"audio": ta, "video": tv, "sabato": sat}
+            self.result_rows.append(row)
 
         self.counts      = [solver.Value(cnt_vars[i]) for i in range(n)]
         self.diff_val    = solver.Value(diff)
@@ -232,20 +319,30 @@ class TurniSolver:
         self.phase = SolvePhase.SOLVED
         return self._format_text()
 
+    # ======================================================================
+    #  FORMAT
+    # ======================================================================
     def _format_text(self) -> str:
         lines = []
         sep   = "-" * 64
         lines += [sep, "  PROGRAMMA TURNI", sep]
 
-        audio_col_w: int = max((len(r["audio"]) for r in self.result_rows), default=20)
+        audio_col_w: int = max(
+            (len(r["audio"]) for r in self.result_rows), default=20)
 
         cur_month = None
+        cur_site  = None
         for r in self.result_rows:
+            site = r.get("site", "")
+            if site and site != cur_site:
+                cur_site = site
+                lines.append(f"\n  === {site.upper()} ===")
             if r["month"] != cur_month:
                 cur_month = r["month"]
                 lines.append(f"\n  {cur_month.upper()}")
                 lines.append("-" * 40)
-            lines.append(f"  {r['week']}")
+            lock_tag = " [BLOCCATO]" if r.get("locked") else ""
+            lines.append(f"  {r['week']}{lock_tag}")
             lines.append(
                 f"    Giovedi  | Audio: {r['audio']:<{audio_col_w}}  Video: {r['video']}")
             lines.append(f"    Domenica | Operatore A/V: {r['sabato']}")
@@ -271,10 +368,32 @@ class TurniSolver:
     def format_csv(self, anno: str) -> str:
         buf = io.StringIO()
         w   = csv.writer(buf)
-        w.writerow(["Anno","Mese","Settimana",
-                    "Giovedi Audio","Giovedi Video","Domenica A/V","Busy"])
-        for r in self.result_rows:
-            w.writerow([_safe_csv_cell(anno), _safe_csv_cell(r["month"]), _safe_csv_cell(r["week"]),
-                        _safe_csv_cell(r["audio"]), _safe_csv_cell(r["video"]),
-                        _safe_csv_cell(r["sabato"]), _safe_csv_cell(r["busy"])])
+        has_sites = any(r.get("site") for r in self.result_rows)
+        if has_sites:
+            w.writerow(["Anno", "Sede", "Mese", "Settimana",
+                        "Giovedi Audio", "Giovedi Video", "Domenica A/V", "Busy"])
+            for r in self.result_rows:
+                w.writerow([
+                    _safe_csv_cell(anno),
+                    _safe_csv_cell(r.get("site", "")),
+                    _safe_csv_cell(r["month"]),
+                    _safe_csv_cell(r["week"]),
+                    _safe_csv_cell(r["audio"]),
+                    _safe_csv_cell(r["video"]),
+                    _safe_csv_cell(r["sabato"]),
+                    _safe_csv_cell(r["busy"]),
+                ])
+        else:
+            w.writerow(["Anno", "Mese", "Settimana",
+                        "Giovedi Audio", "Giovedi Video", "Domenica A/V", "Busy"])
+            for r in self.result_rows:
+                w.writerow([
+                    _safe_csv_cell(anno),
+                    _safe_csv_cell(r["month"]),
+                    _safe_csv_cell(r["week"]),
+                    _safe_csv_cell(r["audio"]),
+                    _safe_csv_cell(r["video"]),
+                    _safe_csv_cell(r["sabato"]),
+                    _safe_csv_cell(r["busy"]),
+                ])
         return buf.getvalue()
