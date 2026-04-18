@@ -16,7 +16,7 @@ source=("${pkgname}-${pkgver}.tar.gz::${url}/archive/refs/heads/Package_Endeavou
 sha256sums=('SKIP')
 
 package() {
-    cd "${srcdir}/software_turni_acustica-main"
+    cd "${srcdir}/software_turni_acustica-Package_Endeavour"
 
     # Installa l'applicazione in /opt
     install -dm755 "${pkgdir}/opt/${pkgname}"
