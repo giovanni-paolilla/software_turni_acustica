@@ -24,7 +24,7 @@ package() {
 
     # Installa dipendenze Python in /opt se non disponibili come pacchetti di sistema
     python3 -m pip install --target="${pkgdir}/opt/${pkgname}/vendor" \
-        --no-deps --ignore-installed \
+        --ignore-installed \
         ortools python-docx customtkinter 2>/dev/null || true
 
     # Launcher
