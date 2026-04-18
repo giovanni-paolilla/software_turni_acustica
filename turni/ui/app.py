@@ -696,9 +696,15 @@ class TurniApp(ctk.CTk):
         # Le settimane possono essere bloccate solo se hanno un'assegnazione precedente
         # (salvata nei result_rows_edit da un solve precedente)
         locked_assignments = {}
+        # Cerca assegnazioni sia nei risultati editabili che nei dati riga (da sessione caricata)
         for r in self._result_rows_edit:
             if r.get("locked") and r.get("locked_assignment"):
                 locked_assignments[r["week"]] = r["locked_assignment"]
+        for rd in self._week_rows:
+            if rd["lock_var"].get() and "locked_assignment" in rd:
+                week_name = rd["name_var"].get()
+                if week_name not in locked_assignments:
+                    locked_assignments[week_name] = rd["locked_assignment"]
 
         if locked_without_assignment:
             unresolved = [w for w in locked_without_assignment if w not in locked_assignments]
@@ -1329,6 +1335,16 @@ class TurniApp(ctk.CTk):
                 if w.get("locked"):
                     rd["lock_var"].set(True)
             self._renumber_weeks(mese)
+
+        # Ripristina locked_assignment dalle locked_results salvate
+        locked_results = session.get("locked_results", [])
+        locked_map: dict[str, dict] = {}
+        for lr in locked_results:
+            locked_map[lr.get("week", "")] = lr.get("locked_assignment", {})
+        for rd in self._week_rows:
+            week_name = rd["name_var"].get()
+            if rd["lock_var"].get() and week_name in locked_map:
+                rd["locked_assignment"] = locked_map[week_name]
 
         self._show_step(1)
         messagebox.showinfo("Caricato",
