@@ -687,6 +687,29 @@ class TurniApp(ctk.CTk):
             messagebox.showerror("Errore", "Aggiungi almeno una settimana.", parent=self)
             return
 
+        # Controlla se ci sono settimane bloccate senza assegnazione
+        locked_without_assignment = [
+            rd["name_var"].get()
+            for rd in self._week_rows
+            if rd["lock_var"].get()
+        ]
+        # Le settimane possono essere bloccate solo se hanno un'assegnazione precedente
+        # (salvata nei result_rows_edit da un solve precedente)
+        locked_assignments = {}
+        for r in self._result_rows_edit:
+            if r.get("locked") and r.get("locked_assignment"):
+                locked_assignments[r["week"]] = r["locked_assignment"]
+
+        if locked_without_assignment:
+            unresolved = [w for w in locked_without_assignment if w not in locked_assignments]
+            if unresolved:
+                messagebox.showwarning("Attenzione",
+                    "Le seguenti settimane sono marcate 'Blocca' ma non hanno "
+                    "un'assegnazione precedente da bloccare (esegui prima il solver):\n\n"
+                    + "\n".join(unresolved) + "\n\n"
+                    "Verranno trattate come settimane normali.",
+                    parent=self)
+
         raw_weeks = []
         for rd in self._week_rows:
             entry = {"month": rd["month"], "week": rd["name_var"].get(),
@@ -697,7 +720,10 @@ class TurniApp(ctk.CTk):
             if rd["date_key"]:
                 entry["date_key"] = rd["date_key"]
             if rd["lock_var"].get():
-                entry["locked"] = True
+                week_name = rd["name_var"].get()
+                if week_name in locked_assignments:
+                    entry["locked"] = True
+                    entry["locked_assignment"] = locked_assignments[week_name]
             raw_weeks.append(entry)
 
         try:
@@ -877,6 +903,14 @@ class TurniApp(ctk.CTk):
         self._edit_combo = combo
         col_key = ["settimana", "audio", "video", "sabato", "sede", "stato"][col_idx]
 
+        def _dismiss_combo():
+            if self._edit_combo is combo:
+                try:
+                    combo.destroy()
+                except tk.TclError:
+                    pass
+                self._edit_combo = None
+
         def on_select(e=None):
             val = combo.get()
             if val:
@@ -887,12 +921,11 @@ class TurniApp(ctk.CTk):
                     self._last_solver.result_rows = list(self._result_rows_edit)
                     self._last_result_text = self._last_solver._format_text()
                     self._set_result(self._last_result_text)
-            combo.destroy()
-            self._edit_combo = None
+            _dismiss_combo()
 
         combo.bind("<<ComboboxSelected>>", on_select)
-        combo.bind("<FocusOut>", lambda e: (combo.destroy(), setattr(self, '_edit_combo', None)))
-        combo.bind("<Escape>", lambda e: (combo.destroy(), setattr(self, '_edit_combo', None)))
+        combo.bind("<FocusOut>", lambda e: _dismiss_combo())
+        combo.bind("<Escape>", lambda e: _dismiss_combo())
 
     def _validate_table_row(self, row_idx):
         row = self._result_rows_edit[row_idx]
@@ -972,12 +1005,15 @@ class TurniApp(ctk.CTk):
 
         if _s and _s.result_rows:
             self._result_rows_edit = [dict(r) for r in _s.result_rows]
+            # Assicura che ogni riga abbia locked_assignment con gli indici,
+            # cosi' l'utente puo' bloccarla in un solve successivo.
             for i, r in enumerate(self._result_rows_edit):
-                if i < len(self.weeks_data):
-                    wd = self.weeks_data[i]
-                    if wd.get("locked") and wd.get("locked_assignment"):
-                        r["locked"] = True
-                        r["locked_assignment"] = wd["locked_assignment"]
+                if "locked_assignment" not in r:
+                    audio_idx = next((j for j, op in enumerate(_s.operatori) if op == r.get("audio")), -1)
+                    video_idx = next((j for j, op in enumerate(_s.operatori) if op == r.get("video")), -1)
+                    sab_idx = next((j for j, op in enumerate(_s.operatori) if op == r.get("sabato")), -1)
+                    if audio_idx >= 0 and video_idx >= 0 and sab_idx >= 0:
+                        r["locked_assignment"] = {"audio": audio_idx, "video": video_idx, "sabato": sab_idx}
         else:
             self._result_rows_edit = []
 

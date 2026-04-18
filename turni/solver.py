@@ -128,7 +128,7 @@ class TurniSolver:
 
         # -- variabili per settimana ---------------------------------------
         for week_idx, week in enumerate(weeks_data):
-            avail = week["available"]
+            avail = week.get("available", [])
 
             # Settimana bloccata: variabili a dominio fisso
             la = week.get("locked_assignment")

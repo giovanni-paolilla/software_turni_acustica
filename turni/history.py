@@ -72,5 +72,4 @@ class HistoryStore:
 
     def clear(self) -> None:
         self._data = {"sessions": [], "cumulative": {}}
-        if os.path.exists(self.filepath):
-            self._save()
+        self._save()
