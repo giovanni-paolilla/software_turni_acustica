@@ -24,6 +24,9 @@ def _canonicalize_timeout_text(timeout_value, *, error_message: str) -> str:
             raise ValueError
     except (TypeError, ValueError) as exc:
         raise SessionValidationError(error_message) from exc
+    # Rappresentazione intera per valori interi (es. "60" non "60.0")
+    if timeout_val == int(timeout_val):
+        return str(int(timeout_val))
     return str(timeout_val)
 
 
@@ -71,9 +74,13 @@ def _validate_week_entries(weeks: list[dict], *, declared_months: list[str] | No
         month = week.get("month")
         week_name = week.get("week")
 
-        if not isinstance(month, str) or not normalize_name(month):
+        if not isinstance(month, str):
             raise SessionValidationError(
-                f"{error_prefix}: presenti settimane associate a mesi non dichiarati nella sessione."
+                f"{error_prefix}: il campo 'month' di ogni settimana deve essere testo."
+            )
+        if not normalize_name(month):
+            raise SessionValidationError(
+                f"{error_prefix}: il campo 'month' di una settimana e' vuoto o composto solo da spazi."
             )
         if declared_months_norm is not None and normalize_name(month) not in declared_months_norm:
             raise SessionValidationError(

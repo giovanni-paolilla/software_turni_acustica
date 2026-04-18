@@ -49,8 +49,11 @@ class HelperTests(unittest.TestCase):
 
     def test_safe_csv_cell_prefixes_formula_like_values(self):
         self.assertEqual(_safe_csv_cell("=2+2"), "'=2+2")
+        self.assertEqual(_safe_csv_cell("+1"), "'+1")
+        self.assertEqual(_safe_csv_cell("-1"), "'-1")
         self.assertEqual(_safe_csv_cell(" @cmd"), "' @cmd")
         self.assertEqual(_safe_csv_cell("Mario Rossi"), "Mario Rossi")
+        self.assertEqual(_safe_csv_cell(42), 42)
 
     def test_atomic_write_replaces_existing_file_contents(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -163,8 +166,32 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(solver.phase, SolvePhase.CANCELLED)
         self.assertFalse(solver.solved_ok)
         self.assertFalse(solver.partial_result_available)
-        self.assertTrue(solver.cancelled)   # proprieta' di retrocompatibilita'
+        self.assertTrue(solver.cancelled)
 
+    @unittest.skipUnless(ORTOOLS_OK, "ortools non installato nel test environment")
+    def test_solve_sets_error_phase_when_no_operators_available(self):
+        # available=[] triggera il controllo early-return → phase ERROR
+        solver = TurniSolver(["Mario", "Luca"], [
+            {"month": "Gennaio", "week": "Sett.1",
+             "available": [], "busy": ["mario", "luca"]},
+        ])
+        result = solver.solve()
+        self.assertEqual(solver.phase, SolvePhase.ERROR)
+        self.assertFalse(solver.solved_ok)
+        self.assertFalse(solver.cancelled)
+        self.assertIn("Errore", result)
+
+    @unittest.skipUnless(ORTOOLS_OK, "ortools non installato nel test environment")
+    def test_solve_sets_error_phase_when_infeasible(self):
+        # Un solo operatore disponibile: ta != tv non soddisfacibile → INFEASIBLE
+        solver = TurniSolver(["Mario", "Luca"], [
+            {"month": "Gennaio", "week": "Sett.1",
+             "available": [0], "busy": ["luca"]},
+        ])
+        result = solver.solve()
+        self.assertEqual(solver.phase, SolvePhase.ERROR)
+        self.assertFalse(solver.solved_ok)
+        self.assertIn("Nessuna soluzione", result)
 
     def test_build_turni_docx_uses_requested_exact_layout(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -268,7 +295,7 @@ class SessionValidationTests(unittest.TestCase):
         self.assertEqual(payload["operatori"], ["Mario Rossi", "Anna Verdi", "Luca Neri"])
         self.assertEqual(payload["mesi"], ["Gennaio"])
         self.assertEqual(payload["weeks"], [{"month": "gennaio", "week": "Sett.1", "busy_indices": [1]}])
-        self.assertEqual(payload["solver_timeout"], "90.0")
+        self.assertEqual(payload["solver_timeout"], "90")
 
     def test_validate_session_payload_rejects_duplicate_weeks(self):
         with self.assertRaises(SessionValidationError):
