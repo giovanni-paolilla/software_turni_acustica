@@ -435,7 +435,6 @@ class TurniApp(ctk.CTk):
         dlg.title("Configura Ruoli Operatori")
         dlg.geometry("520x420")
         dlg.transient(self)
-        dlg.grab_set()
 
         ctk.CTkLabel(dlg, text="Ruoli per operatore",
                      text_color=TEXT, font=FONT_TITLE).pack(pady=(12, 8))
@@ -464,6 +463,9 @@ class TurniApp(ctk.CTk):
                 self.operator_roles[i] = roles if roles else set(ALL_ROLES)
             dlg.destroy()
         styled_btn(dlg, "Applica", apply, bg=SUCCESS).pack(pady=12)
+        dlg.update_idletasks()
+        dlg.after(50, dlg.grab_set)
+        dlg.after(50, dlg.lift)
 
     # ================================================================
     #  DIALOG PATTERN
@@ -481,7 +483,6 @@ class TurniApp(ctk.CTk):
         dlg.title("Pattern Indisponibilita' Ricorrente")
         dlg.geometry("620x420")
         dlg.transient(self)
-        dlg.grab_set()
 
         ctk.CTkLabel(dlg, text="Settimane del mese sempre non disponibili",
                      text_color=TEXT, font=FONT_TITLE).pack(pady=(12, 4))
@@ -515,6 +516,9 @@ class TurniApp(ctk.CTk):
                     self.recurring_busy.pop(i, None)
             dlg.destroy()
         styled_btn(dlg, "Applica", apply, bg=SUCCESS).pack(pady=12)
+        dlg.update_idletasks()
+        dlg.after(50, dlg.grab_set)
+        dlg.after(50, dlg.lift)
 
     # ================================================================
     #  STEP 1
