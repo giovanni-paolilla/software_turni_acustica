@@ -1,0 +1,46 @@
+# Maintainer: Giovanni Paolilla <giovanni-paolilla@users.noreply.github.com>
+pkgname=turni-acustica
+pkgver=1.16.0
+pkgrel=1
+pkgdesc="Pianificazione turni audio/video Messina-Ganzirri con solver CP-SAT"
+arch=('any')
+url="https://github.com/giovanni-paolilla/software_turni_acustica"
+license=('MIT')
+depends=(
+    'python'
+    'tk'
+    'python-ortools'
+    'python-docx'
+    'python-customtkinter'
+)
+# Se i pacchetti python non sono disponibili in AUR, pip li installa nel package()
+makedepends=('python-pip' 'python-setuptools')
+source=("${pkgname}-${pkgver}.tar.gz::${url}/archive/refs/heads/Package_Endeavour.tar.gz")
+sha256sums=('SKIP')
+
+package() {
+    cd "${srcdir}/software_turni_acustica-main"
+
+    # Installa l'applicazione in /opt
+    install -dm755 "${pkgdir}/opt/${pkgname}"
+    cp -r turni turni_v16.py requirements.txt "${pkgdir}/opt/${pkgname}/"
+
+    # Installa dipendenze Python in /opt se non disponibili come pacchetti di sistema
+    python3 -m pip install --target="${pkgdir}/opt/${pkgname}/vendor" \
+        --no-deps --ignore-installed \
+        ortools python-docx customtkinter 2>/dev/null || true
+
+    # Launcher
+    install -Dm755 packaging/turni-acustica.sh "${pkgdir}/usr/bin/turni-acustica"
+
+    # Desktop entry
+    install -Dm644 packaging/turni-acustica.desktop \
+        "${pkgdir}/usr/share/applications/turni-acustica.desktop"
+
+    # Icona
+    install -Dm644 packaging/turni-acustica.svg \
+        "${pkgdir}/usr/share/icons/hicolor/scalable/apps/turni-acustica.svg"
+
+    # Licenza
+    install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}
